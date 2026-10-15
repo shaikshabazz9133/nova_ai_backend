@@ -19,9 +19,21 @@ from auth_security import ACCESS_TOKEN_EXPIRE_MINUTES, create_access_token
 from auth_security import get_current_user_id
 from fastapi.middleware.cors import CORSMiddleware
 
-from database import get_db
+# from database import get_db
+from contextlib import asynccontextmanager
+from database import get_db, create_tables, check_database_connection
 
-app = FastAPI(title="AI Chatbot API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await check_database_connection()
+    await create_tables()
+    yield
+
+
+app = FastAPI(
+    title="AI Chatbot API",
+    lifespan=lifespan,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 
