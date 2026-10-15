@@ -1,0 +1,35 @@
+1. create the folder 
+2. install the packages
+3. add the api key from groq
+4. add main.py file add the code
+5. create the validation using pydamatic ChatRequest name
+6. create the post api 
+7. Connect your chatbot to Groq AI
+
+Code	Why we use it
+load_dotenv()	Loads environment variables from .env.
+AsyncGroq(...)	Creates an asynchronous Groq API client.
+async def chat(...)	Allows the endpoint to await asynchronous operations.
+await client.chat.completions.create(...)	Sends the messages to the LLM and waits for its response.
+"role": "system"	Defines the assistant's behavior.
+"role": "user"	Contains the user's actual question.
+completion.choices[0].message.content	Extracts the generated answer.
+HTTPException(status_code=502, ...)	Returns a controlled error if the AI provider reports an API error.
+
+8. Add conversation history
+9. Separate conversations using conversation IDs so every user has seperated chat right ?
+10. Limit conversation history
+11. Handle Groq API errors
+12. Handling network errors and timeouts in your FastAPI chatbot.
+13. Handling network connection failures.
+14. Retry temporary failures
+15. Validate user messages in your FastAPI chatbot. like validations 
+16. Validate conversation_id 
+17 after this all seperate the all files like prompt , ai_client , conversation_store
+18. 
+
+
+
+
+AI Tool where i learn
+https://chatgpt.com/c/6acd179c-52c4-83ec-85b6-4a7e57f3683f
