@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
@@ -13,7 +14,7 @@ from sqlalchemy import select,func, delete
 from sqlalchemy.exc import IntegrityError
 
 from model import Conversation, Message,  User
-from schemas import RegisterRequest, UserResponse , ConversationResponse, LoginRequest, PaginatedConversationsResponse
+from schemas import EditMessageRequest, RegisterRequest, UserResponse , ConversationResponse, LoginRequest, PaginatedConversationsResponse
 from security import hash_password, verify_password
 from auth_security import ACCESS_TOKEN_EXPIRE_MINUTES, create_access_token
 from auth_security import get_current_user_id
@@ -197,6 +198,147 @@ async def chat(
         "reply": ai_reply,
         "history_messages": len(updated_history),
     }
+
+
+@app.patch("/conversations/{conversation_id}/messages/{message_id}")
+async def edit_message(
+    conversation_id: str,
+    message_id: str,
+    request: EditMessageRequest,
+    user_id: str = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_db),
+):
+    # 1. Verify that this conversation belongs to the logged-in user.
+    result = await session.execute(
+        select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.user_id == user_id,
+        )
+    )
+    conversation = result.scalar_one_or_none()
+
+    if conversation is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation not found.",
+        )
+
+    # 2. Load messages in chronological order.
+    result = await session.execute(
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.asc(), Message.id.asc())
+    )
+    saved_messages = list(result.scalars().all())
+
+    # 3. Find the message that the user wants to edit.
+    edit_index = next(
+        (
+            index
+            for index, item in enumerate(saved_messages)
+            if item.id == message_id
+        ),
+        None,
+    )
+
+    if edit_index is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Message not found.",
+        )
+
+    edited_message = saved_messages[edit_index]
+
+    if edited_message.role != "user":
+        raise HTTPException(
+            status_code=400,
+            detail="Only user messages can be edited.",
+        )
+
+    # 4. Preserve earlier messages as context for the AI.
+    earlier_history = [
+        {"role": item.role, "content": item.content}
+        for item in saved_messages[:edit_index]
+    ]
+
+    ai_messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        *earlier_history,
+        {"role": "user", "content": request.message},
+    ]
+
+    # 5. Generate the new AI answer BEFORE changing the database.
+    try:
+        completion = await client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=ai_messages,
+        )
+
+        ai_reply = completion.choices[0].message.content
+
+        if not ai_reply:
+            raise HTTPException(
+                status_code=502,
+                detail="The AI service returned an empty response.",
+            )
+
+    except RateLimitError:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests. Please try again later.",
+        )
+    except APITimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="The AI service took too long to respond.",
+        )
+    except APIConnectionError:
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to connect to the AI service.",
+        )
+    except APIError:
+        raise HTTPException(
+            status_code=502,
+            detail="The AI service could not process your request.",
+        )
+
+    # 6. Remove the selected message and all subsequent messages.
+    messages_to_remove = saved_messages[edit_index:]
+    message_ids = [item.id for item in messages_to_remove]
+
+    await session.execute(
+        delete(Message).where(Message.id.in_(message_ids))
+    )
+
+    # 7. Save the edited user message and its replacement AI answer.
+    now = datetime.now(timezone.utc)
+
+    session.add_all([
+        Message(
+            conversation_id=conversation_id,
+            role="user",
+            content=request.message,
+            created_at=now,
+        ),
+        Message(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=ai_reply,
+            created_at=now + timedelta(microseconds=1),
+        ),
+    ])
+
+    # 8. Commit the replacement together.
+    await session.commit()
+
+    return {
+        "conversation_id": conversation_id,
+        "message_id": message_id,
+        "user_message": request.message,
+        "reply": ai_reply,
+    }
+
 
 
 @app.post(

@@ -47,4 +47,8 @@ class PaginatedConversationsResponse(BaseModel):
     total: int
     page: int
     page_size: int
-    total_pages: int          
+    total_pages: int    
+
+class EditMessageRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+
